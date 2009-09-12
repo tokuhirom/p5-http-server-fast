@@ -33,7 +33,7 @@ test_tcp(
                 'PATH_INFO'       => '/foo',
                 'HTTP_X_FOO'      => 'bar'
             });
-            [200, ['Content-Length' => 3, 'Content-Type' => 'text/html'], 'OK!'];
+            return [200, ['Content-Length' => 3, 'Content-Type' => 'text/html'], 'OK!'];
         });
     },
 );

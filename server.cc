@@ -196,12 +196,20 @@ void do_handle(int connfd)
     if (SvROK(res_ref) && SvTYPE(SvRV(res_ref))==SVt_PVAV) {
         // ok
         AV* res = (AV*)SvRV(res_ref);
-        SV * status_sv = av_fetch(res, 0, 0);
+        SV ** v = av_fetch(res, 0, 0);
+        if (!v) {
+            debug("cannot get status");
+            http_error(connfd, 500, "internal server error");
+            return;
+        }
+        sv_dump(*v);
+        /*
         int status = SvIV(status_sv);
 
         char buf[1024];
         int size = snprintf(buf, 1024, "HTTP/%s %d %d", protocol.c_str(), status, status);
         send(connfd, buf, size, 0);
+        */
     } else {
         debug("handler should return arrayref");
         http_error(connfd, 500, "internal server error");
