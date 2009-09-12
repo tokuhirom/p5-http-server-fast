@@ -22,7 +22,9 @@ extern "C" {
 static struct flock lock_it, unlock_it;
 static int lock_fd = -1;
 static int nchildren;
+#ifdef PREFORK
 static pid_t *pids;
+#endif
 static SV* handler;
 
 extern "C" {
@@ -38,8 +40,6 @@ void run(int port, int _nchildren, SV *_handler);
     }
 
 
-
-#define croak(x) perror((x))
 #define debug(...) fprintf(stderr, __VA_ARGS__)
 
 void
@@ -89,12 +89,11 @@ my_lock_release()
 
 std::string read_line(int fd, size_t max_len) {
     std::string line;
-    int prev_char = -1;
-    int ch;
+    char prev_char = -1;
+    char ch;
     while (read(fd, &ch, 1) == 1) {
         line += ch;
         if ((ch == '\n') || line.size() == max_len) {
-            debug("HOT\n");
             break;
         }
         prev_char = ch;
@@ -102,6 +101,21 @@ std::string read_line(int fd, size_t max_len) {
     return line;
 }
 
+void to_cgi_name(std::string &src) {
+    for (unsigned int i=0; i<src.size(); i++) {
+        if (islower(src[i])) {
+            src[i] = toupper(src[i]);
+        } else if (src[i] == '-') {
+            src[i] = '_';
+        }
+    }
+    if (src != "CONTENT_TYPE" && src != "CONTENT_LENGTH") {
+        src = "HTTP_" + src;
+    }
+}
+
+static void http_error(int fd, int status, const char *message) {
+}
 
 void do_handle(int connfd)
 {
@@ -109,21 +123,40 @@ void do_handle(int connfd)
 
     // parse GET / HTTP/1.0
     std::string status_line = read_line(connfd, 1024);
+    if (status_line[status_line.size()-1] != '\n') {
+        http_error(connfd, 400, "bad request");
+        debug("invalid request");
+        return;
+    }
+    debug("status line: %s\n", status_line.c_str());
     int first = status_line.find(' ');
     std::string method = status_line.substr(0, first);
     int second = status_line.find(' ', first+1);
-    std::string path = status_line.substr(first, second-first);
-    std::string protocol = status_line.substr(second+6, 3);
     debug("num: %d, %d\n", first, second);
+    std::string path_query = status_line.substr(first+1, second-first-1);
+    std::string protocol = status_line.substr(second+6, 3);
     debug("method: %s\n", method.c_str());
-    debug("path: %s\n", path.c_str());
+    debug("path_query: %s\n", path_query.c_str());
     debug("protocol: %s\n", protocol.c_str());
+    int pqq = path_query.find('?');
+    std::string path_info = pqq >= 0 ? path_query.substr(0, pqq) : path_query;
+    std::string query_string = pqq >= 0 ? path_query.substr(pqq+1, path_query.size()-(pqq+1)) : "";
 
     HV * env = newHV();
+#define SET(k, v) hv_store(env, k, strlen(k), newSVpv((v).c_str(), (v).size()), 0);
+    SET("REQUEST_METHOD", method);
+    SET("PATH_INFO", path_info);
+    SET("QUERY_STRING", query_string);
+    SET("SERVER_PROTOCOL", protocol);
+#undef SET
 
     // parse headers
     for (;;) {
         std::string line = read_line(connfd, 1024);
+        if (line == "\r\n") {
+            debug("REACH TO END");
+            break;
+        }
         int pos = line.find(':');
         std::string key = line.substr(0, pos);
         std::string val = line.substr(pos+1, line.size()-(pos+1));
@@ -133,18 +166,56 @@ void do_handle(int connfd)
         while (val[val.size()-1] == '\r' || val[val.size()-1]=='\n' || val[val.size()-1]==' ') {
             val = val.substr(0, val.size()-1);
         }
+        to_cgi_name(key);
         debug("headers: '%s' '%s'\n", key.c_str(), val.c_str());
+        hv_store(env, key.c_str(), key.size(), newSVpv(val.c_str(), val.size()), 0);
     }
-    send(connfd, "OK\n", 3, 0);
+
+    debug("READY TO CALLBACK\n");
+    dSP;
+
+    ENTER;
+    SAVETMPS;
+
+    PUSHMARK(SP);
+    XPUSHs(sv_2mortal(newRV_inc((SV*)env)));
+    PUTBACK;
+
+    int count = call_sv(handler, G_SCALAR);
+
+    FREETMPS;
+    LEAVE;
+
+    if (count != 1) {
+        debug("handler should return single arrayref");
+        http_error(connfd, 500, "internal server error");
+        return;
+    }
+
+    SV * res_ref = POPs;
+    if (SvROK(res_ref) && SvTYPE(SvRV(res_ref))==SVt_PVAV) {
+        // ok
+        AV* res = (AV*)SvRV(res_ref);
+        SV * status_sv = av_fetch(res, 0, 0);
+        int status = SvIV(status_sv);
+
+        char buf[1024];
+        int size = snprintf(buf, 1024, "HTTP/%s %d %d", protocol.c_str(), status, status);
+        send(connfd, buf, size, 0);
+    } else {
+        debug("handler should return arrayref");
+        http_error(connfd, 500, "internal server error");
+        return;
+    }
 }
 
 void
-child_main(int i, int listenfd)
+child_main(int listenfd)
 {
     int connfd;
     socklen_t clilen;
     struct sockaddr_in cliaddr;
-    
+
     printf("child %ld starting\n", (long)getpid());
     
     for (;;) {
@@ -170,15 +241,17 @@ child_main(int i, int listenfd)
 }
 
 pid_t
-child_make(int i, int listenfd)
+child_make(int listenfd)
 {
     pid_t pid;
     if ( (pid = fork()) > 0 ) {
         return pid;//Parent
     }
-    child_main(i, listenfd);
+    child_main(listenfd);
+    return -1;
 }
 
+#ifdef PREFORK
 void
 sig_int(int signo)
 {
@@ -194,6 +267,7 @@ sig_int(int signo)
     }
     exit(0);
 }
+#endif
 
 void ignore_sigpipe() {
     // Set signal handler to ignore SIGPIPE.
@@ -224,21 +298,25 @@ void run(int port, int _nchildren, SV *_handler) {
 
     listen(listenfd, 64);
 
-    pids = (pid_t*)calloc(nchildren, sizeof(pid_t));
     my_lock_init("/tmp/lock.XXXXXXXXXXXXXX");
+
+#ifdef PREFORK
+    pids = (pid_t*)calloc(nchildren, sizeof(pid_t));
 
     int i;
     for (i = 0; i < nchildren; i++) {
-        pids[i] = child_make(i, listenfd);
+        pids[i] = child_make(listenfd);
     }
 
     signal(SIGINT, sig_int);
-
     debug("access http://0.0.0.0:%d/\n", port);
 
     for (;;) {
         pause();
     }
+#else
+    child_main(listenfd);
+#endif
 }
 
 #ifdef STANDALONE
