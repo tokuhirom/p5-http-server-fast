@@ -2,7 +2,8 @@ use inc::Module::Install;
 name 'HTTP-Server-Fast';
 all_from 'lib/HTTP/Server/Fast.pm';
 
-# requires '';
+cc_warnings;
+use_ppport 3.19;
 
 tests 't/*.t';
 author_tests 'xt';
