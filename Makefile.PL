@@ -5,6 +5,8 @@ all_from 'lib/HTTP/Server/Fast.pm';
 cc_warnings;
 use_ppport 3.19;
 
+cc_append_to_libs 'stdc++';
+
 tests 't/*.t';
 author_tests 'xt';
 
