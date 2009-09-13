@@ -173,12 +173,13 @@ static void send_response(int connfd, const char *protocol, SV*res_ref) {
         char * val_c = SvPV(*val_sv, val_len);
 
         char * buf;
-        Newx(buf, key_len + val_len + 3, char);
+        Newx(buf, key_len + val_len + 4, char);
         strcpy(buf, key_c);
         strcpy(buf+key_len, ":");
         strcpy(buf+key_len+1, val_c);
-        strcpy(buf+key_len+2+val_len, "\r\n");
-        send(connfd, buf, key_len+val_len+3, 0);
+        strcpy(buf+key_len+1+val_len, "\r\n");
+        debug("sending header '%s'\n", buf);
+        send(connfd, buf, key_len+1+val_len+2, 0);
         Safefree(buf);
     }
     send(connfd, "\r\n", sizeof("\r\n"), 0);
