@@ -137,6 +137,32 @@ static void http_error_500(int fd, const char * protocol, const char *internal_r
     http_error(fd, protocol, 500, "internal server error");
 }
 
+static void send_body(int connfd, const char *protocol, AV*res) {
+    // sending body
+    SV ** body_ref = av_fetch(res, 2, 0);
+    ASSERT_HTTP(body_ref);
+    sv_dump(*body_ref);
+    sv_dump(SvRV(*body_ref));
+    ASSERT_HTTP(SvROK(*body_ref));
+    SV* body = SvRV(*body_ref);
+    sv_dump(body);
+    if (SvTYPE(body) == SVt_PVAV) {
+        debug("ready to send body %d\n", av_len((AV*)body));
+        sv_dump((SV*)body);
+        for (int i=0; i<av_len((AV*)body)+1; ++i) {
+            debug("sending body %d\n", i);
+            STRLEN elem_len;
+            SV ** elem_sv = av_fetch((AV*)body, i, 0);
+            ASSERT_HTTP(elem_sv);
+            const char * elem_c = SvPV(*elem_sv, elem_len);
+            send(connfd, elem_c, elem_len, 0);
+        }
+    } else {
+        http_error_500(connfd, protocol, "this server doesn't support ->getline thing");
+        return;
+    }
+}
+
 static void send_response(int connfd, const char *protocol, SV*res_ref) {
     if (!SvROK(res_ref) || SvTYPE(SvRV(res_ref))!=SVt_PVAV) {
         http_error_500(connfd, protocol, "handler should return arrayref");
@@ -162,7 +188,7 @@ static void send_response(int connfd, const char *protocol, SV*res_ref) {
     AV * headers = (AV*)SvRV(*v);
     debug("ready to send headers %d\n", av_len((AV*)headers));
     SV* val;
-    for (int i=0; i<av_len(headers); i+=2) {
+    for (int i=0; i<av_len(headers)+1; i+=2) {
         STRLEN key_len;
         SV ** key_sv = av_fetch(headers, i, 0);
         ASSERT_HTTP(key_sv);
@@ -182,32 +208,9 @@ static void send_response(int connfd, const char *protocol, SV*res_ref) {
         send(connfd, buf, key_len+1+val_len+2, 0);
         Safefree(buf);
     }
-    send(connfd, "\r\n", sizeof("\r\n"), 0);
+    send(connfd, "\r\n", 2, 0);
 
-    SV ** body_ref = av_fetch(res, 2, 0);
-    ASSERT_HTTP(body_ref);
-    sv_dump(*body_ref);
-    sv_dump(SvRV(*body_ref));
-    ASSERT_HTTP(SvROK(*body_ref));
-    SV* body = SvRV(*body_ref);
-    sv_dump(body);
-    if (SvTYPE(body) == SVt_PVAV) {
-        debug("ready to send body %d\n", av_len((AV*)body));
-        sv_dump((SV*)body);
-        for (int i=0; i<av_len((AV*)body); ++i) {
-            debug("sending body %d\n", i);
-            STRLEN elem_len;
-            SV ** elem_sv = av_fetch(headers, i, 0);
-            ASSERT_HTTP(elem_sv);
-            const char * elem_c = SvPV(*elem_sv, elem_len);
-            printf("%s\n", elem_c);
-            send(connfd, elem_c, elem_len, 0);
-            debug("Sent body\n");
-        }
-    } else {
-        http_error_500(connfd, protocol, "this server doesn't support ->getline thing");
-        return;
-    }
+    send_body(connfd, protocol, res);
 }
 
 void do_handle(int connfd)
