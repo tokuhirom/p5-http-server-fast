@@ -17,14 +17,15 @@ test_tcp(
         print $sock "X-Foo: bar\r\n";
         print $sock "\r\n";
         print $sock "YATTA!!";
-        sleep 3;
+        warn $port;
+        my $status_line = <$sock>;
+        is $status_line, "HTTP/1.0 200 200\r\n";
         done_testing;
     },
     server => sub {
         my $port = shift;
         HTTP::Server::Fast::run($port, 1, sub {
             my $env = shift;
-            use Data::Dumper; warn Dumper($env);
             is_deeply($env, {
                 'REQUEST_METHOD'  => 'GET',
                 'SERVER_PROTOCOL' => '1.0',
@@ -33,7 +34,7 @@ test_tcp(
                 'PATH_INFO'       => '/foo',
                 'HTTP_X_FOO'      => 'bar'
             });
-            return [200, ['Content-Length' => 3, 'Content-Type' => 'text/html'], 'OK!'];
+            return [200, ['Content-Length' => 3, 'Content-Type' => 'text/html'], ['OK!']];
         });
     },
 );

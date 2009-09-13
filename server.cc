@@ -27,6 +27,13 @@ static pid_t *pids;
 #endif
 static SV* handler;
 
+#define ASSERT_HTTP(x) do { \
+            if (!x) { \
+                http_error_500(connfd, protocol, "assertion failed"); \
+                return; \
+            } \
+        } while (0)
+
 extern "C" {
 void run(int port, int _nchildren, SV *_handler);
 }
@@ -114,7 +121,92 @@ void to_cgi_name(std::string &src) {
     }
 }
 
-static void http_error(int fd, int status, const char *message) {
+void send_status_line(int connfd, const char *protocol, int status) {
+    debug("sending status line\r\n");
+    char buf[1024];
+    int size = snprintf(buf, 1024, "HTTP/%s %d %d\r\n", protocol, status, status);
+    send(connfd, buf, size, 0);
+}
+
+static void http_error(int fd, const char *protocol, int status, const char *message) {
+    send_status_line(fd, protocol, status);
+}
+
+static void http_error_500(int fd, const char * protocol, const char *internal_reason) {
+    debug("%s\n", internal_reason);
+    http_error(fd, protocol, 500, "internal server error");
+}
+
+static void send_response(int connfd, const char *protocol, SV*res_ref) {
+    if (!SvROK(res_ref) || SvTYPE(SvRV(res_ref))!=SVt_PVAV) {
+        http_error_500(connfd, protocol, "handler should return arrayref");
+        return;
+    }
+
+    AV* res = (AV*)SvRV(res_ref);
+
+    SV ** status_ref = av_fetch(res, 0, 0);
+    if (!status_ref) {
+        http_error_500(connfd, protocol, "cannot get status");
+        return;
+    }
+    SV * status_sv = *status_ref;
+    int status = SvIV(status_sv);
+    send_status_line(connfd, protocol, status);
+
+    SV ** v = av_fetch(res, 1, 0);
+    if (!v) {
+        http_error_500(connfd, protocol, "cannot get header");
+        return;
+    }
+    AV * headers = (AV*)SvRV(*v);
+    debug("ready to send headers %d\n", av_len((AV*)headers));
+    SV* val;
+    for (int i=0; i<av_len(headers); i+=2) {
+        STRLEN key_len;
+        SV ** key_sv = av_fetch(headers, i, 0);
+        ASSERT_HTTP(key_sv);
+        char * key_c = SvPV(*key_sv, key_len);
+        STRLEN val_len;
+        SV ** val_sv = av_fetch(headers, i+1, 0);
+        ASSERT_HTTP(val_sv);
+        char * val_c = SvPV(*val_sv, val_len);
+
+        char * buf;
+        Newx(buf, key_len + val_len + 3, char);
+        strcpy(buf, key_c);
+        strcpy(buf+key_len, ":");
+        strcpy(buf+key_len+1, val_c);
+        strcpy(buf+key_len+2+val_len, "\r\n");
+        send(connfd, buf, key_len+val_len+3, 0);
+        Safefree(buf);
+    }
+    send(connfd, "\r\n", sizeof("\r\n"), 0);
+
+    SV ** body_ref = av_fetch(res, 2, 0);
+    ASSERT_HTTP(body_ref);
+    sv_dump(*body_ref);
+    sv_dump(SvRV(*body_ref));
+    ASSERT_HTTP(SvROK(*body_ref));
+    SV* body = SvRV(*body_ref);
+    sv_dump(body);
+    if (SvTYPE(body) == SVt_PVAV) {
+        debug("ready to send body %d\n", av_len((AV*)body));
+        sv_dump((SV*)body);
+        for (int i=0; i<av_len((AV*)body); ++i) {
+            debug("sending body %d\n", i);
+            STRLEN elem_len;
+            SV ** elem_sv = av_fetch(headers, i, 0);
+            ASSERT_HTTP(elem_sv);
+            const char * elem_c = SvPV(*elem_sv, elem_len);
+            printf("%s\n", elem_c);
+            send(connfd, elem_c, elem_len, 0);
+            debug("Sent body\n");
+        }
+    } else {
+        http_error_500(connfd, protocol, "this server doesn't support ->getline thing");
+        return;
+    }
 }
 
 void do_handle(int connfd)
@@ -124,7 +216,7 @@ void do_handle(int connfd)
     // parse GET / HTTP/1.0
     std::string status_line = read_line(connfd, 1024);
     if (status_line[status_line.size()-1] != '\n') {
-        http_error(connfd, 400, "bad request");
+        http_error(connfd, "1.0", 400, "bad request");
         debug("invalid request");
         return;
     }
@@ -172,6 +264,8 @@ void do_handle(int connfd)
     }
 
     debug("READY TO CALLBACK\n");
+
+    // see perlcall.pod
     dSP;
 
     ENTER;
@@ -183,38 +277,21 @@ void do_handle(int connfd)
 
     int count = call_sv(handler, G_SCALAR);
 
-    FREETMPS;
-    LEAVE;
+    SPAGAIN;
+
 
     if (count != 1) {
-        debug("handler should return single arrayref");
-        http_error(connfd, 500, "internal server error");
+        http_error_500(connfd, protocol.c_str(), "handler should return single arrayref");
         return;
     }
 
     SV * res_ref = POPs;
-    if (SvROK(res_ref) && SvTYPE(SvRV(res_ref))==SVt_PVAV) {
-        // ok
-        AV* res = (AV*)SvRV(res_ref);
-        SV ** v = av_fetch(res, 0, 0);
-        if (!v) {
-            debug("cannot get status");
-            http_error(connfd, 500, "internal server error");
-            return;
-        }
-        sv_dump(*v);
-        /*
-        int status = SvIV(status_sv);
+    debug("ready for send response\n");
+    send_response(connfd, protocol.c_str(), res_ref);
+    debug("finished to send response\n");
 
-        char buf[1024];
-        int size = snprintf(buf, 1024, "HTTP/%s %d %d", protocol.c_str(), status, status);
-        send(connfd, buf, size, 0);
-        */
-    } else {
-        debug("handler should return arrayref");
-        http_error(connfd, 500, "internal server error");
-        return;
-    }
+    FREETMPS;
+    LEAVE;
 }
 
 void
