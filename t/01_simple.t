@@ -18,8 +18,18 @@ test_tcp(
         print $sock "\r\n";
         print $sock "YATTA!!";
         warn $port;
-        my $status_line = <$sock>;
-        is $status_line, "HTTP/1.0 200 200\r\n";
+        {
+            my $buf = <$sock>;
+            is $buf, "HTTP/1.0 200 200\r\n";
+               $buf = <$sock>;
+            is $buf, "Content-Length:3\r\n";
+               $buf = <$sock>;
+            is $buf, "Content-Type:text/html\r\n";
+               $buf = <$sock>;
+            is $buf, "\r\n";
+               $buf = <$sock>;
+            is $buf, "OK!";
+        }
         done_testing;
     },
     server => sub {
