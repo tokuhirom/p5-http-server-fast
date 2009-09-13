@@ -28,8 +28,6 @@ test_tcp(
                $buf = <$sock>;
             is $buf, "\r\n";
                $buf = <$sock>;
-               use Devel::Peek;
-               Dump($buf);
             is $buf, "OK!";
         }
         done_testing;

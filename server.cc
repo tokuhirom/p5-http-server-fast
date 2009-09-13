@@ -141,14 +141,10 @@ static void send_body(int connfd, const char *protocol, AV*res) {
     // sending body
     SV ** body_ref = av_fetch(res, 2, 0);
     ASSERT_HTTP(body_ref);
-    sv_dump(*body_ref);
-    sv_dump(SvRV(*body_ref));
     ASSERT_HTTP(SvROK(*body_ref));
     SV* body = SvRV(*body_ref);
-    sv_dump(body);
     if (SvTYPE(body) == SVt_PVAV) {
         debug("ready to send body %d\n", av_len((AV*)body));
-        sv_dump((SV*)body);
         for (int i=0; i<av_len((AV*)body)+1; ++i) {
             debug("sending body %d\n", i);
             STRLEN elem_len;
