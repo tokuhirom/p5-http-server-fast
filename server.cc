@@ -34,6 +34,9 @@ static SV* handler;
             } \
         } while (0)
 
+// 500KB is good enough
+#define BUFSIZ 500000
+
 extern "C" {
 void run(int port, int _nchildren, SV *_handler);
 }
@@ -130,6 +133,7 @@ void send_status_line(int connfd, const char *protocol, int status) {
 
 static void http_error(int fd, const char *protocol, int status, const char *message) {
     send_status_line(fd, protocol, status);
+    // TODO: send message body
 }
 
 static void http_error_500(int fd, const char * protocol, const char *internal_reason) {
@@ -261,6 +265,17 @@ void do_handle(int connfd)
         to_cgi_name(key);
         debug("headers: '%s' '%s'\n", key.c_str(), val.c_str());
         hv_store(env, key.c_str(), key.size(), newSVpv(val.c_str(), val.size()), 0);
+    }
+
+    // set input file handle
+    {
+        PerlIO *input = PerlIO_fdopen(connfd, "r");
+        GV *gv = newGVgen("HTTP::Server::Fast::_sock"); // so bad, we don't need to use glob
+        if (input && do_open(gv, "+<&", 3, FALSE, 0, 0, input)) {
+            SV * input_sv = sv_2mortal(newSViv(0));
+            sv_setsv(input_sv, sv_bless(newRV((SV*)gv), gv_stashpv("HTTP::Server::Fast::_sock",1)));
+            (void) hv_store(env, "psgi.input", strlen("psgi.input"), input_sv, 0);
+        }
     }
 
     debug("READY TO CALLBACK\n");
