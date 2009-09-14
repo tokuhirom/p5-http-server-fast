@@ -35,7 +35,9 @@ static SV* handler;
         } while (0)
 
 // 500KB is good enough
-#define BUFSIZ 500000
+#define HTTP_BUFSIZ 500000
+
+static void http_error_500(int fd, const char * protocol, const char *internal_reason);
 
 extern "C" {
 void run(int port, int _nchildren, SV *_handler);
@@ -131,16 +133,6 @@ void send_status_line(int connfd, const char *protocol, int status) {
     send(connfd, buf, size, 0);
 }
 
-static void http_error(int fd, const char *protocol, int status, const char *message) {
-    send_status_line(fd, protocol, status);
-    // TODO: send message body
-}
-
-static void http_error_500(int fd, const char * protocol, const char *internal_reason) {
-    debug("%s\n", internal_reason);
-    http_error(fd, protocol, 500, "internal server error");
-}
-
 static void send_body(int connfd, const char *protocol, AV*res) {
     // sending body
     SV ** body_ref = av_fetch(res, 2, 0);
@@ -161,6 +153,23 @@ static void send_body(int connfd, const char *protocol, AV*res) {
         http_error_500(connfd, protocol, "this server doesn't support ->getline thing");
         return;
     }
+}
+
+static void http_error(int fd, const char *protocol, int status, const char *message) {
+    send_status_line(fd, protocol, status);
+    std::string buf;
+    buf += "Content-Type: text/plain\r\n";
+    buf += "Content-Length: ";
+    buf += strlen(message);
+    buf += "\r\n";
+    buf += "\r\n";
+    buf += message;
+    send(fd, buf.c_str(), buf.size(), 0);
+}
+
+static void http_error_500(int fd, const char * protocol, const char *internal_reason) {
+    debug("%s\n", internal_reason);
+    http_error(fd, protocol, 500, "internal server error");
 }
 
 static void send_response(int connfd, const char *protocol, SV*res_ref) {
