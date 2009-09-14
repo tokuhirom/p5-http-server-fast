@@ -19,6 +19,11 @@ extern "C" {
 #include <signal.h>
 #include <string>
 
+/*
+ * TODO: request timeout
+ * TODO: more fast http header parser(picohttpparser?)
+ */
+
 static struct flock lock_it, unlock_it;
 static int lock_fd = -1;
 static int nchildren;
@@ -174,7 +179,7 @@ static void http_error_500(int fd, const char * protocol, const char *internal_r
 
 static void send_response(int connfd, const char *protocol, SV*res_ref) {
     if (!SvROK(res_ref) || SvTYPE(SvRV(res_ref))!=SVt_PVAV) {
-        http_error_500(connfd, protocol, "handler should return arrayref");
+        http_error_500(connfd, protocol, "handler should return arrayref!");
         return;
     }
 
