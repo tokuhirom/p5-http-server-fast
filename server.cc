@@ -1,3 +1,6 @@
+#include "picohttpparser/picohttpparser.c"
+#include "xs_assert.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -21,7 +24,6 @@ extern "C" {
 
 /*
  * TODO: request timeout
- * TODO: more fast http header parser(picohttpparser?)
  */
 
 static struct flock lock_it, unlock_it;
@@ -34,7 +36,7 @@ static SV* handler;
 
 #define ASSERT_HTTP(x) do { \
             if (!x) { \
-                http_error_500(connfd, protocol, "assertion failed"); \
+                http_error_500(connfd, minor_version, "assertion failed"); \
                 return; \
             } \
         } while (0)
@@ -42,7 +44,7 @@ static SV* handler;
 // 500KB is good enough
 #define HTTP_BUFSIZ 500000
 
-static void http_error_500(int fd, const char * protocol, const char *internal_reason);
+static void http_error_500(int fd, int minor_version, const char *internal_reason);
 
 extern "C" {
 void run(int port, int _nchildren, SV *_handler);
@@ -57,7 +59,11 @@ void run(int port, int _nchildren, SV *_handler);
     }
 
 
+#ifdef DEBUG
 #define debug(...) fprintf(stderr, __VA_ARGS__)
+#else
+#define debug(...)
+#endif
 
 void
 my_lock_init(const char *pathname)
@@ -104,20 +110,6 @@ my_lock_release()
     }
 }
 
-std::string read_line(int fd, size_t max_len) {
-    std::string line;
-    char prev_char = -1;
-    char ch;
-    while (read(fd, &ch, 1) == 1) {
-        line += ch;
-        if ((ch == '\n') || line.size() == max_len) {
-            break;
-        }
-        prev_char = ch;
-    }
-    return line;
-}
-
 void to_cgi_name(std::string &src) {
     for (unsigned int i=0; i<src.size(); i++) {
         if (islower(src[i])) {
@@ -131,14 +123,14 @@ void to_cgi_name(std::string &src) {
     }
 }
 
-void send_status_line(int connfd, const char *protocol, int status) {
+void send_status_line(int connfd, int minor_version, int status) {
     debug("sending status line\r\n");
     char buf[1024];
-    int size = snprintf(buf, 1024, "HTTP/%s %d %d\r\n", protocol, status, status);
+    int size = snprintf(buf, 1024, "HTTP/1.%d %d %d\r\n", minor_version, status, status);
     send(connfd, buf, size, 0);
 }
 
-static void send_body(int connfd, const char *protocol, AV*res) {
+static void send_body(int connfd, int minor_version, AV*res) {
     // sending body
     SV ** body_ref = av_fetch(res, 2, 0);
     ASSERT_HTTP(body_ref);
@@ -155,13 +147,13 @@ static void send_body(int connfd, const char *protocol, AV*res) {
             send(connfd, elem_c, elem_len, 0);
         }
     } else {
-        http_error_500(connfd, protocol, "this server doesn't support ->getline thing");
+        http_error_500(connfd, minor_version, "this server doesn't support ->getline thing");
         return;
     }
 }
 
-static void http_error(int fd, const char *protocol, int status, const char *message) {
-    send_status_line(fd, protocol, status);
+static void http_error(int fd, int minor_version, int status, const char *message) {
+    send_status_line(fd, minor_version, status);
     std::string buf;
     buf += "Content-Type: text/plain\r\n";
     buf += "Content-Length: ";
@@ -172,14 +164,14 @@ static void http_error(int fd, const char *protocol, int status, const char *mes
     send(fd, buf.c_str(), buf.size(), 0);
 }
 
-static void http_error_500(int fd, const char * protocol, const char *internal_reason) {
+static void http_error_500(int fd, int minor_version, const char *internal_reason) {
     debug("%s\n", internal_reason);
-    http_error(fd, protocol, 500, "internal server error");
+    http_error(fd, minor_version, 500, "internal server error");
 }
 
-static void send_response(int connfd, const char *protocol, SV*res_ref) {
+static void send_response(int connfd, int minor_version, SV*res_ref) {
     if (!SvROK(res_ref) || SvTYPE(SvRV(res_ref))!=SVt_PVAV) {
-        http_error_500(connfd, protocol, "handler should return arrayref!");
+        http_error_500(connfd, minor_version, "handler should return arrayref!");
         return;
     }
 
@@ -187,21 +179,20 @@ static void send_response(int connfd, const char *protocol, SV*res_ref) {
 
     SV ** status_ref = av_fetch(res, 0, 0);
     if (!status_ref) {
-        http_error_500(connfd, protocol, "cannot get status");
+        http_error_500(connfd, minor_version, "cannot get status");
         return;
     }
     SV * status_sv = *status_ref;
     int status = SvIV(status_sv);
-    send_status_line(connfd, protocol, status);
+    send_status_line(connfd, minor_version, status);
 
     SV ** v = av_fetch(res, 1, 0);
     if (!v) {
-        http_error_500(connfd, protocol, "cannot get header");
+        http_error_500(connfd, minor_version, "cannot get header");
         return;
     }
     AV * headers = (AV*)SvRV(*v);
     debug("ready to send headers %d\n", av_len((AV*)headers));
-    SV* val;
     for (int i=0; i<av_len(headers)+1; i+=2) {
         STRLEN key_len;
         SV ** key_sv = av_fetch(headers, i, 0);
@@ -224,103 +215,126 @@ static void send_response(int connfd, const char *protocol, SV*res_ref) {
     }
     send(connfd, "\r\n", 2, 0);
 
-    send_body(connfd, protocol, res);
+    send_body(connfd, minor_version, res);
 }
 
 void do_handle(int connfd)
 {
     debug("DO HANDLE\n");
+    char *buf;
+    int bufsiz = 500 * 1000; // 500KB
+    size_t read_cnt = 0;
+    buf = (char*)malloc(bufsiz * sizeof(char));
+    assert(buf);
+    const char* method;
+    size_t method_len;
+    const char* path;
+    size_t path_len;
+    int minor_version;
+    struct phr_header headers[10];
+    size_t num_headers = 10;
 
-    // parse GET / HTTP/1.0
-    std::string status_line = read_line(connfd, 1024);
-    if (status_line[status_line.size()-1] != '\n') {
-        http_error(connfd, "1.0", 400, "bad request");
-        debug("invalid request");
-        return;
-    }
-    debug("status line: %s\n", status_line.c_str());
-    int first = status_line.find(' ');
-    std::string method = status_line.substr(0, first);
-    int second = status_line.find(' ', first+1);
-    debug("num: %d, %d\n", first, second);
-    std::string path_query = status_line.substr(first+1, second-first-1);
-    std::string protocol = status_line.substr(second+6, 3);
-    debug("method: %s\n", method.c_str());
-    debug("path_query: %s\n", path_query.c_str());
-    debug("protocol: %s\n", protocol.c_str());
-    int pqq = path_query.find('?');
-    std::string path_info = pqq >= 0 ? path_query.substr(0, pqq) : path_query;
-    std::string query_string = pqq >= 0 ? path_query.substr(pqq+1, path_query.size()-(pqq+1)) : "";
-
-    HV * env = newHV();
-#define SET(k, v) hv_store(env, k, strlen(k), newSVpv((v).c_str(), (v).size()), 0);
-    SET("REQUEST_METHOD", method);
-    SET("PATH_INFO", path_info);
-    SET("QUERY_STRING", query_string);
-    SET("SERVER_PROTOCOL", protocol);
+    while (1) {
+        debug("-- looping \n");
+        size_t cur_read_cnt = read(connfd, buf+read_cnt, bufsiz);
+        debug("cur_read_cnt is %d\n", cur_read_cnt);
+        if (cur_read_cnt == 0) {
+            debug("** eof ** %d, %d\n", bufsiz, bufsiz);
+            free(buf);
+            return;
+        } else if (cur_read_cnt == -1) {
+            perror("reading error");
+            free(buf);
+            return;
+        }
+        read_cnt += cur_read_cnt;
+        int ret = phr_parse_request(buf, read_cnt, &method, &method_len, &path, &path_len, &minor_version, headers, &num_headers, 0);
+        if (ret >= 0) {
+            // got request
+            HV * env = newHV();
+#define SET(k, v, vlen) hv_store(env, k, strlen(k), newSVpv((v), (vlen)), 0);
+            SET("REQUEST_METHOD", method, method_len);
+            {
+                std::string path_query(path, path_len);
+                int pqq = path_query.find('?');
+                std::string path_info = pqq >= 0 ? path_query.substr(0, pqq) : path_query;
+                std::string query_string = pqq >= 0 ? path_query.substr(pqq+1, path_query.size()-(pqq+1)) : "";
+                SET("PATH_INFO", path_info.c_str(), path_info.size());
+                SET("QUERY_STRING", query_string.c_str(), query_string.size());
+            }
+            {
+                char protocol[4];
+                protocol[0]='1'; protocol[1] = '.'; protocol[2] = '0'+minor_version; protocol[3] = '\0';
+                SET("SERVER_PROTOCOL", protocol, 3);
+            }
 #undef SET
 
-    // parse headers
-    for (;;) {
-        std::string line = read_line(connfd, 1024);
-        if (line == "\r\n") {
-            debug("REACH TO END");
-            break;
+            for (size_t i=0; i<num_headers; i++) {
+                std::string name(headers[i].name, headers[i].name_len);
+                to_cgi_name(name);
+                hv_store(env, name.c_str(), name.size(), newSVpv(headers[i].value, headers[i].value_len), 0);
+            }
+
+            // set input file handle
+            {
+                PerlIO *input = PerlIO_fdopen(connfd, "r");
+                GV *gv = newGVgen("HTTP::Server::Fast::_sock"); // so bad, we don't need to use glob
+                if (input && do_open(gv, "+<&", 3, FALSE, 0, 0, input)) {
+                    SV * input_sv = sv_2mortal(newSViv(0));
+                    sv_setsv(input_sv, sv_bless(newRV((SV*)gv), gv_stashpv("HTTP::Server::Fast::_sock",1)));
+                    (void) hv_store(env, "psgi.input", strlen("psgi.input"), input_sv, 0);
+                }
+            }
+
+            debug("READY TO CALLBACK\n");
+
+            // see perlcall.pod
+            dSP;
+
+            ENTER;
+            SAVETMPS;
+
+            PUSHMARK(SP);
+            XPUSHs(sv_2mortal(newRV_inc((SV*)env)));
+            PUTBACK;
+
+            int count = call_sv(handler, G_SCALAR);
+
+            SPAGAIN;
+
+
+            if (count != 1) {
+                http_error_500(connfd, minor_version, "handler should return single arrayref");
+                free(buf);
+                return;
+            }
+
+            SV * res_ref = POPs;
+            debug("ready for send response\n");
+            send_response(connfd, minor_version, res_ref);
+            debug("finished to send response\n");
+
+            FREETMPS;
+            LEAVE;
+            free(buf);
+            return;
+        } else if (ret == -2) {
+            // partial request.
+            if (cur_read_cnt != 0) {
+                debug("realloc\n");
+                bufsiz *= 2;
+                buf = (char*)realloc(buf, bufsiz);
+                assert(buf);
+            }
+        } else if (ret == -1) {
+            // failed.
+            // TODO: 400 bad request
+            debug("400 BAD REQUEST");
+            free(buf);
+            return;
         }
-        int pos = line.find(':');
-        std::string key = line.substr(0, pos);
-        std::string val = line.substr(pos+1, line.size()-(pos+1));
-        while (val[0] == ' ') {
-            val = val.substr(1, val.size()-1);
-        }
-        while (val[val.size()-1] == '\r' || val[val.size()-1]=='\n' || val[val.size()-1]==' ') {
-            val = val.substr(0, val.size()-1);
-        }
-        to_cgi_name(key);
-        debug("headers: '%s' '%s'\n", key.c_str(), val.c_str());
-        hv_store(env, key.c_str(), key.size(), newSVpv(val.c_str(), val.size()), 0);
     }
-
-    // set input file handle
-    {
-        PerlIO *input = PerlIO_fdopen(connfd, "r");
-        GV *gv = newGVgen("HTTP::Server::Fast::_sock"); // so bad, we don't need to use glob
-        if (input && do_open(gv, "+<&", 3, FALSE, 0, 0, input)) {
-            SV * input_sv = sv_2mortal(newSViv(0));
-            sv_setsv(input_sv, sv_bless(newRV((SV*)gv), gv_stashpv("HTTP::Server::Fast::_sock",1)));
-            (void) hv_store(env, "psgi.input", strlen("psgi.input"), input_sv, 0);
-        }
-    }
-
-    debug("READY TO CALLBACK\n");
-
-    // see perlcall.pod
-    dSP;
-
-    ENTER;
-    SAVETMPS;
-
-    PUSHMARK(SP);
-    XPUSHs(sv_2mortal(newRV_inc((SV*)env)));
-    PUTBACK;
-
-    int count = call_sv(handler, G_SCALAR);
-
-    SPAGAIN;
-
-
-    if (count != 1) {
-        http_error_500(connfd, protocol.c_str(), "handler should return single arrayref");
-        return;
-    }
-
-    SV * res_ref = POPs;
-    debug("ready for send response\n");
-    send_response(connfd, protocol.c_str(), res_ref);
-    debug("finished to send response\n");
-
-    FREETMPS;
-    LEAVE;
+    abort(); // should not reach here.
 }
 
 void
