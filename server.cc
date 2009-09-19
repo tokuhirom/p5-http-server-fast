@@ -236,7 +236,7 @@ void do_handle(int connfd)
 
     while (1) {
         debug("-- looping \n");
-        size_t cur_read_cnt = read(connfd, buf+read_cnt, bufsiz);
+        ssize_t cur_read_cnt = read(connfd, buf+read_cnt, bufsiz);
         debug("cur_read_cnt is %d\n", cur_read_cnt);
         if (cur_read_cnt == 0) {
             debug("** eof ** %d, %d\n", bufsiz, bufsiz);
