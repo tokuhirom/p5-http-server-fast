@@ -7,6 +7,7 @@ use_ppport 3.19;
 
 cc_append_to_libs 'stdc++';
 cc_append_to_ccflags '-O0';
+cc_append_to_ccflags '-DDEBUG';
 
 requires_xs 'XS::Assert'; # will be remove
 

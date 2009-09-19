@@ -280,6 +280,7 @@ void do_handle(int connfd)
                 PerlIO *input = PerlIO_fdopen(connfd, "r");
                 GV *gv = newGVgen("HTTP::Server::Fast::_sock"); // so bad, we don't need to use glob
                 if (input && do_open(gv, "+<&", 3, FALSE, 0, 0, input)) {
+                    PerlIO_unread(pTHX_ input, buf+ret, bufsiz+ret);
                     SV * input_sv = sv_2mortal(newSViv(0));
                     sv_setsv(input_sv, sv_bless(newRV((SV*)gv), gv_stashpv("HTTP::Server::Fast::_sock",1)));
                     (void) hv_store(env, "psgi.input", strlen("psgi.input"), input_sv, 0);
