@@ -24,6 +24,8 @@ extern "C" {
 
 /*
  * TODO: request timeout
+ * TODO: sendfile support
+ * TODO: keep-alive support
  */
 
 static struct flock lock_it, unlock_it;
