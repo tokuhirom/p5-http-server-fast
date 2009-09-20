@@ -212,11 +212,11 @@ static void send_response(int connfd, int minor_version, SV*res_ref) {
         char * val_c = SvPV(*val_sv, val_len);
 
         res_buf.append(key_c, key_len);
-        res_buf.append(":", sizeof(":"));
+        res_buf.append(":", 1);
         res_buf.append(val_c, val_len);
-        res_buf.append("\r\n", sizeof("\r\n"));
+        res_buf.append("\r\n", 2);
     }
-    res_buf.append("\r\n", sizeof("\r\n"));
+    res_buf.append("\r\n", 2);
     send(connfd, res_buf.c_str(), res_buf.size(), 0);
 
     send_body(connfd, minor_version, res);
