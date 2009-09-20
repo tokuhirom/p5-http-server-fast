@@ -289,9 +289,9 @@ void do_handle(int connfd)
                     if (ret != read_cnt) {
                         PerlIO_unread(pTHX_ input, buf+ret, bufsiz+ret);
                     }
-                    SV * input_sv = sv_2mortal(newSViv(0));
+                    SV * input_sv = newSViv(0);
                     sv_setsv(input_sv, sv_bless(newRV((SV*)gv), gv_stashpv("HTTP::Server::Fast::_sock",1)));
-                    (void) hv_store(env, "psgi.input", strlen("psgi.input"), input_sv, 0);
+                    (void) hv_store(env, "psgi.input", sizeof("psgi.input")-1, input_sv, 0);
                 }
             }
 
@@ -304,7 +304,7 @@ void do_handle(int connfd)
             SAVETMPS;
 
             PUSHMARK(SP);
-            XPUSHs(sv_2mortal(newRV_inc(sv_2mortal((SV*)env))));
+            mXPUSHs(newRV_inc(sv_2mortal((SV*)env)));
             PUTBACK;
 
             int count = call_sv(handler, G_SCALAR);
