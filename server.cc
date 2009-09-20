@@ -256,7 +256,7 @@ void do_handle(int connfd)
         if (ret >= 0) {
             // got request
             HV * env = newHV();
-#define SET(k, v, vlen) hv_store(env, k, strlen(k), newSVpv((v), (vlen)), 0);
+#define SET(k, v, vlen) hv_store(env, k, sizeof(k)-1, newSVpv((v), (vlen)), 0);
             SET("REQUEST_METHOD", method, method_len);
             {
                 std::string path_query(path, path_len);
@@ -302,7 +302,7 @@ void do_handle(int connfd)
             SAVETMPS;
 
             PUSHMARK(SP);
-            XPUSHs(sv_2mortal(newRV_inc((SV*)env)));
+            XPUSHs(sv_2mortal(newRV_inc(sv_2mortal((SV*)env))));
             PUTBACK;
 
             int count = call_sv(handler, G_SCALAR);
