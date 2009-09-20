@@ -14,3 +14,4 @@ ppport.h
 server.o
 a.out
 picohttpparser/.svn/
+callgrind.out.*
