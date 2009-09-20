@@ -422,7 +422,7 @@ void run(int port, int _nchildren, SV *_handler) {
 
     int listenfd = socket(AF_INET, SOCK_STREAM, 0);
 
-    int reuse;
+    int reuse = 1;
     setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, (const char *)&reuse, sizeof(reuse));
 
     struct sockaddr_in client;
