@@ -406,7 +406,8 @@ sig_int(int signo)
 
 void ignore_sigpipe() {
     // Set signal handler to ignore SIGPIPE.
-    struct sigaction sa = {};  // Zero-clear.
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
     sa.sa_handler = SIG_IGN;
     sigemptyset(&sa.sa_mask);
     SYS_ASSERT(sigaction(SIGPIPE, &sa, NULL));
