@@ -445,6 +445,7 @@ void run(int port, int _nchildren, SV *_handler) {
     }
 
     signal(SIGINT, sig_int);
+    signal(SIGTERM, sig_int);
     debug("access http://0.0.0.0:%d/\n", port);
 
     for (;;) {
