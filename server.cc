@@ -123,11 +123,17 @@ void to_cgi_name(std::string &src) {
     }
 }
 
-void send_status_line(int connfd, int minor_version, int status) {
-    debug("sending status line\r\n");
+std::string make_status_line(int minor_version, int status) {
+    debug("making status line\r\n");
     char buf[1024];
     int size = snprintf(buf, 1024, "HTTP/1.%d %d %d\r\n", minor_version, status, status);
-    send(connfd, buf, size, 0);
+    return std::string(buf, size);
+}
+
+void send_status_line(int connfd, int minor_version, int status) {
+    debug("sending status line\r\n");
+    std::string buf = make_status_line(minor_version, status);
+    send(connfd, buf.c_str(), buf.size(), 0);
 }
 
 static void send_body(int connfd, int minor_version, AV*res) {
@@ -153,8 +159,8 @@ static void send_body(int connfd, int minor_version, AV*res) {
 }
 
 static void http_error(int fd, int minor_version, int status, const char *message) {
-    send_status_line(fd, minor_version, status);
     std::string buf;
+    buf += make_status_line(minor_version, status);
     buf += "Content-Type: text/plain\r\n";
     buf += "Content-Length: ";
     buf += strlen(message);
@@ -184,7 +190,9 @@ static void send_response(int connfd, int minor_version, SV*res_ref) {
     }
     SV * status_sv = *status_ref;
     int status = SvIV(status_sv);
-    send_status_line(connfd, minor_version, status);
+    std::string res_buf;
+    res_buf.reserve(5000);
+    res_buf += make_status_line(minor_version, status);
 
     SV ** v = av_fetch(res, 1, 0);
     if (!v) {
@@ -203,17 +211,13 @@ static void send_response(int connfd, int minor_version, SV*res_ref) {
         ASSERT_HTTP(val_sv);
         char * val_c = SvPV(*val_sv, val_len);
 
-        char * buf;
-        Newx(buf, key_len + val_len + 4, char);
-        strcpy(buf, key_c);
-        strcpy(buf+key_len, ":");
-        strcpy(buf+key_len+1, val_c);
-        strcpy(buf+key_len+1+val_len, "\r\n");
-        debug("sending header '%s'\n", buf);
-        send(connfd, buf, key_len+1+val_len+2, 0);
-        Safefree(buf);
+        res_buf.append(key_c, key_len);
+        res_buf.append(":", sizeof(":"));
+        res_buf.append(val_c, val_len);
+        res_buf.append("\r\n", sizeof("\r\n"));
     }
-    send(connfd, "\r\n", 2, 0);
+    res_buf.append("\r\n", sizeof("\r\n"));
+    send(connfd, res_buf.c_str(), res_buf.size(), 0);
 
     send_body(connfd, minor_version, res);
 }
@@ -223,7 +227,7 @@ void do_handle(int connfd)
     debug("DO HANDLE\n");
     char *buf;
     int bufsiz = 500 * 1000; // 500KB
-    size_t read_cnt = 0;
+    ssize_t read_cnt = 0;
     buf = (char*)malloc(bufsiz * sizeof(char));
     assert(buf);
     const char* method;
