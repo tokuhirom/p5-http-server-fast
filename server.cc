@@ -430,9 +430,15 @@ void run(int port, int _nchildren, SV *_handler) {
     client.sin_port = htons(port);
     client.sin_addr.s_addr = htonl(INADDR_ANY);
 
-    bind(listenfd, (struct sockaddr*)&client, sizeof(client));
+    if (bind(listenfd, (struct sockaddr*)&client, sizeof(client)) == -1) {
+        Perl_croak("bind: %s", strerror(errno));
+        return;
+    }
 
-    listen(listenfd, 64);
+    if (listen(listenfd, 64) == -1) {
+        Perl_croak("listen: %s", strerror(errno));
+        return;
+    }
 
     my_lock_init("/tmp/lock.XXXXXXXXXXXXXX");
 
