@@ -282,16 +282,15 @@ void do_handle(int connfd)
             }
 
             // set input file handle
-            {
+            GV *gv = (GV*)SvREFCNT_inc(newGVgen("HTTP::Server::Fast"));
+            if (gv) {
                 PerlIO *input = PerlIO_fdopen(connfd, "r");
-                GV *gv = newGVgen("HTTP::Server::Fast::_sock"); // so bad, we don't need to use glob
+                hv_delete(GvSTASH(gv), GvNAME(gv), GvNAMELEN(gv), G_DISCARD);
                 if (input && do_open(gv, "+<&", 3, FALSE, 0, 0, input)) {
                     if (ret != read_cnt) {
                         PerlIO_unread(pTHX_ input, buf+ret, bufsiz+ret);
                     }
-                    SV * input_sv = newSViv(0);
-                    sv_setsv(input_sv, sv_bless(newRV((SV*)gv), gv_stashpv("HTTP::Server::Fast::_sock",1)));
-                    (void) hv_store(env, "psgi.input", sizeof("psgi.input")-1, input_sv, 0);
+                    (void) hv_store(env, "psgi.input", sizeof("psgi.input")-1, newRV((SV*)gv), 0);
                 }
             }
 
@@ -304,13 +303,12 @@ void do_handle(int connfd)
             SAVETMPS;
 
             PUSHMARK(SP);
-            mXPUSHs(newRV_inc(sv_2mortal((SV*)env)));
+            mXPUSHs(newRV_noinc((SV*)env));
             PUTBACK;
 
             int count = call_sv(handler, G_SCALAR);
 
             SPAGAIN;
-
 
             if (count != 1) {
                 http_error_500(connfd, minor_version, "handler should return single arrayref");
@@ -354,8 +352,12 @@ child_main(int listenfd)
     struct sockaddr_in cliaddr;
 
     printf("child %ld starting\n", (long)getpid());
-    
+
+#ifdef LIMIT_RUNNING
+    for (int i=0; i < LIMIT_RUNNING; i++) {
+#else
     for (;;) {
+#endif
         clilen = sizeof(cliaddr);
         my_lock_wait();
             connfd = accept(listenfd, (struct sockaddr*)&cliaddr, &clilen);
