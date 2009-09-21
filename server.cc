@@ -288,7 +288,7 @@ void do_handle(int connfd)
                 hv_delete(GvSTASH(gv), GvNAME(gv), GvNAMELEN(gv), G_DISCARD);
                 if (input && do_open(gv, "+<&", 3, FALSE, 0, 0, input)) {
                     if (ret != read_cnt) {
-                        PerlIO_unread(aTHX_ input, buf+ret, bufsiz+ret);
+                        PerlIO_unread(input, buf+ret, bufsiz+ret);
                     }
                     (void) hv_store(env, "psgi.input", sizeof("psgi.input")-1, newRV((SV*)gv), 0);
                 }
