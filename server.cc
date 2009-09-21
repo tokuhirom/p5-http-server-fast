@@ -21,6 +21,7 @@ extern "C" {
 #include <fcntl.h>
 #include <signal.h>
 #include <string>
+#include <sstream>
 
 /*
  * TODO: request timeout
@@ -161,15 +162,15 @@ static void send_body(int connfd, int minor_version, AV*res) {
 }
 
 static void http_error(int fd, int minor_version, int status, const char *message) {
-    std::string buf;
-    buf += make_status_line(minor_version, status);
-    buf += "Content-Type: text/plain\r\n";
-    buf += "Content-Length: ";
-    buf += strlen(message);
-    buf += "\r\n";
-    buf += "\r\n";
-    buf += message;
-    send(fd, buf.c_str(), buf.size(), 0);
+    std::stringstream buf;
+    buf << make_status_line(minor_version, status);
+    buf << "Content-Type: text/plain\r\n";
+    buf << "Content-Length: ";
+    buf << strlen(message);
+    buf << "\r\n";
+    buf << "\r\n";
+    buf << message;
+    send(fd, buf.str().c_str(), buf.str().size(), 0);
 }
 
 static void http_error_500(int fd, int minor_version, const char *internal_reason) {
