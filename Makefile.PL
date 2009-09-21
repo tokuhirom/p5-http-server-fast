@@ -5,7 +5,11 @@ all_from 'lib/HTTP/Server/Fast.pm';
 cc_warnings;
 use_ppport 3.19;
 
-cc_append_to_libs 'stdc++';
+makemaker_args       CC    => 'g++';
+makemaker_args       LD    => 'g++';
+makemaker_args       XSOPT => '-C++';
+makemaker_args       XSOPT => '-C++';
+
 cc_append_to_ccflags '-O0';
 # cc_append_to_ccflags '-DPREFORK';
 # cc_append_to_ccflags '-DDEBUG=1';
