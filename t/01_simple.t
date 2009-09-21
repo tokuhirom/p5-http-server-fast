@@ -17,7 +17,6 @@ test_tcp(
         print $sock "X-Foo: bar\r\n";
         print $sock "\r\n";
         print $sock "YATTA!!";
-        warn $port;
         {
             my $buf = <$sock>;
             is $buf, "HTTP/1.0 200 200\r\n";
