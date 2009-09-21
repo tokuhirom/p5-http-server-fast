@@ -8,6 +8,10 @@ extern "C" {
 };
 #endif
 
+extern "C" {
+void run(int port, int nchild, SV*cb);
+}
+
 MODULE = HTTP::Server::Fast PACKAGE = HTTP::Server::Fast
 
 PROTOTYPES: DISABLED
