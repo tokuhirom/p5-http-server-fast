@@ -288,7 +288,7 @@ void do_handle(int connfd)
                 hv_delete(GvSTASH(gv), GvNAME(gv), GvNAMELEN(gv), G_DISCARD);
                 if (input && do_open(gv, "+<&", 3, FALSE, 0, 0, input)) {
                     if (ret != read_cnt) {
-                        PerlIO_unread(pTHX_ input, buf+ret, bufsiz+ret);
+                        PerlIO_unread(aTHX_ input, buf+ret, bufsiz+ret);
                     }
                     (void) hv_store(env, "psgi.input", sizeof("psgi.input")-1, newRV((SV*)gv), 0);
                 }
@@ -303,7 +303,7 @@ void do_handle(int connfd)
             SAVETMPS;
 
             PUSHMARK(SP);
-            mXPUSHs(newRV_noinc((SV*)env));
+            XPUSHs(sv_2mortal(newRV_noinc((SV*)env)));
             PUTBACK;
 
             int count = call_sv(handler, G_SCALAR);
@@ -435,12 +435,12 @@ void run(int port, int _nchildren, SV *_handler) {
     client.sin_addr.s_addr = htonl(INADDR_ANY);
 
     if (bind(listenfd, (struct sockaddr*)&client, sizeof(client)) == -1) {
-        Perl_croak("bind: %s", strerror(errno));
+        Perl_croak(aTHX_ "bind: %s", strerror(errno));
         return;
     }
 
     if (listen(listenfd, 64) == -1) {
-        Perl_croak("listen: %s", strerror(errno));
+        Perl_croak(aTHX_ "listen: %s", strerror(errno));
         return;
     }
 
