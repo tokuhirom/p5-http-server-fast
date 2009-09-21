@@ -1,16 +1,6 @@
 #include "picohttpparser/picohttpparser.c"
 #include "xs_assert.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-#include "EXTERN.h"
-#include "perl.h"
-#include "XSUB.h"
-#ifdef __cplusplus
-};
-#endif
-
 #include <stdio.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -22,6 +12,16 @@ extern "C" {
 #include <signal.h>
 #include <string>
 #include <sstream>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+#include "EXTERN.h"
+#include "perl.h"
+#include "XSUB.h"
+#ifdef __cplusplus
+};
+#endif
 
 /*
  * TODO: request timeout

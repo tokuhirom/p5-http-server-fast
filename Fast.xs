@@ -5,12 +5,9 @@ extern "C" {
 #include "perl.h"
 #include "XSUB.h"
 #ifdef __cplusplus
+void run(int port, int nchild, SV*cb);
 };
 #endif
-
-extern "C" {
-void run(int port, int nchild, SV*cb);
-}
 
 MODULE = HTTP::Server::Fast PACKAGE = HTTP::Server::Fast
 
