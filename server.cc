@@ -48,6 +48,7 @@ static SV* handler;
 #define HTTP_BUFSIZ 500000
 
 static void http_error_500(int fd, int minor_version, const char *internal_reason);
+static void http_error_400(int fd, int minor_version, const char *internal_reason);
 
 extern "C" {
 void run(int port, int _nchildren, SV *_handler);
@@ -178,6 +179,11 @@ static void http_error_500(int fd, int minor_version, const char *internal_reaso
     http_error(fd, minor_version, 500, "internal server error");
 }
 
+static void http_error_400(int fd, int minor_version, const char *internal_reason) {
+    debug("400 bad request: %s\n", internal_reason);
+    http_error(fd, minor_version, 400, "Bad Request");
+}
+
 static void send_response(int connfd, int minor_version, SV*res_ref) {
     if (!SvROK(res_ref) || SvTYPE(SvRV(res_ref))!=SVt_PVAV) {
         http_error_500(connfd, minor_version, "handler should return arrayref!");
@@ -231,8 +237,7 @@ void do_handle(int connfd)
     char *buf;
     int bufsiz = 500 * 1000; // 500KB
     ssize_t read_cnt = 0;
-    buf = (char*)malloc(bufsiz * sizeof(char));
-    assert(buf);
+    Newxz(buf, bufsiz, char);
     const char* method;
     size_t method_len;
     const char* path;
@@ -331,13 +336,14 @@ void do_handle(int connfd)
             if (cur_read_cnt != 0) {
                 debug("realloc\n");
                 bufsiz *= 2;
-                buf = (char*)realloc(buf, bufsiz);
-                assert(buf);
+                Renew(buf, bufsiz, char);
             }
         } else if (ret == -1) {
             // failed.
-            // TODO: 400 bad request
-            debug("400 BAD REQUEST");
+            http_error_400(connfd, minor_version, "picohttpparser returns -1");
+            debug("--- failed\n");
+            debug(buf);
+            debug("\n--- failed\n");
             free(buf);
             return;
         }
@@ -391,23 +397,27 @@ child_make(int listenfd)
     return -1;
 }
 
-#ifdef PREFORK
 void
 sig_int(int signo)
 {
+#ifdef PREFORK
     int i;
     for (i = 0; i < nchildren; i++) {
         debug("killing %d\n", i);
-        kill(pids[i], SIGTERM);
+        if (kill(pids[i], SIGTERM) != 0) {
+            perror("kill");
+        }
     }
-    while (wait(NULL) > 0) { 1; }
+    debug("waiting\n");
+    while (wait(NULL) > 0) {  }
     if (errno != ECHILD) {
         perror("wait error");
         exit(1);
     }
+#endif
+    debug("--FINISHED--\n");
     exit(0);
 }
-#endif
 
 void ignore_sigpipe() {
     // Set signal handler to ignore SIGPIPE.
@@ -463,6 +473,8 @@ void run(int port, int _nchildren, SV *_handler) {
         pause();
     }
 #else
+    signal(SIGINT, sig_int);
+    signal(SIGTERM, sig_int);
     child_main(listenfd);
 #endif
 }

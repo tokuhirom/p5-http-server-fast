@@ -12,10 +12,7 @@ test_tcp(
             PeerHost => '127.0.0.1',
             PeerPort => $port,
         ) or die;
-        print $sock "GET /foo?bar=baz HTTP/1.0\r\n";
-        print $sock "Content-Type: text/plain\r\n";
-        print $sock "X-Foo: bar\r\n";
-        print $sock "\r\n";
+        print $sock "GET /foo?bar=baz HTTP/1.0\r\nContent-Type: text/plain\r\nX-Foo: bar\r\n\r\n";
         print $sock "YATTA!!";
         {
             my $buf = <$sock>;
