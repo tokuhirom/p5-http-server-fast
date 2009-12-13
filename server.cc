@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <arpa/inet.h>
 #include <stdlib.h>
@@ -77,7 +78,7 @@ my_lock_init(const char *pathname)
     strncpy(lock_file, pathname, sizeof(lock_file));
     mkstemp(lock_file);
 
-    lock_fd = open(lock_file, O_CREAT | O_WRONLY);
+    lock_fd = open(lock_file, O_WRONLY, O_CREAT);
     unlink(lock_file);
 
     lock_it.l_type = F_WRLCK;
