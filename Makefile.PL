@@ -11,8 +11,8 @@ makemaker_args       XSOPT => '-C++';
 makemaker_args       XSOPT => '-C++';
 
 cc_append_to_ccflags '-O0';
-# cc_append_to_ccflags '-DPREFORK';
-# cc_append_to_ccflags '-DDEBUG=1';
+cc_append_to_ccflags '-DPREFORK';
+cc_append_to_ccflags '-DDEBUG=1';
 # cc_append_to_ccflags '-DLIMIT_RUNNING=1000';
 
 can_cc               or die 'This module requires C++ compiler.';
